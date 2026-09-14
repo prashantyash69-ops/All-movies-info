@@ -1,27 +1,98 @@
-import React, { useState } from 'react';
-
-const TRENDING_ANIME = [
-  { id: '1', title: 'Your Name', image: 'https://cdn.myanimelist.net/images/anime/5/87048.jpg' },
-  { id: '2', title: 'Spirited Away', image: 'https://cdn.myanimelist.net/images/anime/6/79597.jpg' },
-  { id: '3', title: 'Akira', image: 'https://cdn.myanimelist.net/images/anime/10/43003.jpg' },
-  { id: '4', title: 'Suzume', image: 'https://cdn.myanimelist.net/images/anime/1120/136178.jpg' },
-];
-
-const DISCOVER_ANIME = [
-  { id: '5', title: 'A Silent Voice', image: 'https://cdn.myanimelist.net/images/anime/1122/96435.jpg' },
-  { id: '6', title: 'Perfect Blue', image: 'https://cdn.myanimelist.net/images/anime/11/79131.jpg' },
-  { id: '7', title: 'Ghost in the Shell', image: 'https://cdn.myanimelist.net/images/anime/10/82594.jpg' },
-  { id: '8', title: 'Princess Mononoke', image: 'https://cdn.myanimelist.net/images/anime/7/75919.jpg' },
-  { id: '9', title: 'Weathering with You', image: 'https://cdn.myanimelist.net/images/anime/1880/101146.jpg' },
-  { id: '10', title: 'Howl\'s Moving Castle', image: 'https://cdn.myanimelist.net/images/anime/5/73199.jpg' },
-];
+import React, { useState, useEffect } from 'react';
 
 export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
+  const [trending, setTrending] = useState([]);
+  const [discover, setDiscover] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  // The AniList GraphQL Endpoint
+  const ANILIST_URL = 'https://graphql.anilist.co';
+
+  // Load default trending and popular movies on initial load
+  useEffect(() => {
+    fetchDefaultAnime();
+  }, []);
+
+  // Run search when the user types (waits for at least 3 characters)
+  useEffect(() => {
+    if (searchQuery.length > 2) {
+      const delayDebounce = setTimeout(() => searchAnime(searchQuery), 500);
+      return () => clearTimeout(delayDebounce);
+    } else if (searchQuery.length === 0) {
+      fetchDefaultAnime(); // Reset to discover when search is cleared
+    }
+  }, [searchQuery]);
+
+  // GraphQL Query for initial page load (Format: MOVIE)
+  const fetchDefaultAnime = async () => {
+    setLoading(true);
+    const query = `
+      query {
+        trending: Page(page: 1, perPage: 10) {
+          media(sort: TRENDING_DESC, type: ANIME, format: MOVIE) {
+            id
+            title { english romaji }
+            coverImage { extraLarge }
+          }
+        }
+        popular: Page(page: 1, perPage: 20) {
+          media(sort: POPULARITY_DESC, type: ANIME, format: MOVIE) {
+            id
+            title { english romaji }
+            coverImage { extraLarge }
+          }
+        }
+      }
+    `;
+    
+    try {
+      const response = await fetch(ANILIST_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query })
+      });
+      const data = await response.json();
+      setTrending(data.data.trending.media);
+      setDiscover(data.data.popular.media);
+    } catch (error) {
+      console.error("Error fetching AniList", error);
+    }
+    setLoading(false);
+  };
+
+  // GraphQL Query for Search
+  const searchAnime = async (search) => {
+    const query = `
+      query ($search: String) {
+        Page(page: 1, perPage: 20) {
+          media(search: $search, type: ANIME, format: MOVIE, sort: SEARCH_MATCH) {
+            id
+            title { english romaji }
+            coverImage { extraLarge }
+          }
+        }
+      }
+    `;
+    
+    try {
+      const response = await fetch(ANILIST_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, variables: { search } })
+      });
+      const data = await response.json();
+      setDiscover(data.data.Page.media);
+    } catch (error) {
+      console.error("Error searching AniList", error);
+    }
+  };
+
+  // Helper function to safely get the English title, or fallback to Romaji
+  const getTitle = (anime) => anime.title.english || anime.title.romaji;
 
   return (
     <div className="min-h-screen bg-gray-900 text-white font-sans pb-10">
-      
       <header className="sticky top-0 z-50 bg-gray-900/90 backdrop-blur-md p-4 shadow-md">
         <div className="max-w-6xl mx-auto flex flex-col md:flex-row gap-4 items-center justify-between">
           <h1 className="text-2xl font-bold text-indigo-500 tracking-tight">AniDiscover</h1>
@@ -37,48 +108,59 @@ export default function App() {
 
       <main className="max-w-6xl mx-auto px-4 mt-6 space-y-10">
         
-        <section>
-          <h2 className="text-xl font-bold mb-4 px-1">Trending Now</h2>
-          <div className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory hide-scrollbar">
-            {TRENDING_ANIME.map((anime) => (
-              <div key={anime.id} className="snap-start shrink-0 w-64 md:w-80 group cursor-pointer">
-                <div className="overflow-hidden rounded-2xl relative aspect-video">
-                  <img 
-                    src={anime.image} 
-                    alt={anime.title} 
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent"></div>
-                  <h3 className="absolute bottom-3 left-4 text-lg font-semibold">{anime.title}</h3>
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
+        {/* Trending Section */}
+        {searchQuery.length === 0 && (
+          <section>
+            <h2 className="text-xl font-bold mb-4 px-1">Trending Now</h2>
+            <div className="flex overflow-x-auto gap-4 pb-4 snap-x snap-mandatory hide-scrollbar">
+              {loading ? (
+                <p className="text-gray-400 px-1">Loading trending...</p>
+              ) : (
+                trending.map((anime) => (
+                  <div key={anime.id} className="snap-start shrink-0 w-64 md:w-80 group cursor-pointer">
+                    <div className="overflow-hidden rounded-2xl relative aspect-video bg-gray-800">
+                      <img 
+                        src={anime.coverImage.extraLarge} 
+                        alt={getTitle(anime)} 
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                      />
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent"></div>
+                      <h3 className="absolute bottom-3 left-4 text-lg font-semibold">{getTitle(anime)}</h3>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+        )}
 
+        {/* Discover / Search Results Section */}
         <section>
           <div className="flex justify-between items-end mb-4 px-1">
-            <h2 className="text-xl font-bold">Discover</h2>
-            <div className="hidden md:flex gap-2 text-xs">
-              <button className="px-3 py-1 bg-indigo-600 rounded-full">All</button>
-              <button className="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded-full">Action</button>
-              <button className="px-3 py-1 bg-gray-800 hover:bg-gray-700 rounded-full">Romance</button>
-            </div>
+            <h2 className="text-xl font-bold">
+              {searchQuery.length > 0 ? `Search Results for "${searchQuery}"` : 'Discover'}
+            </h2>
           </div>
           
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 md:gap-6">
-            {DISCOVER_ANIME.map((anime) => (
-              <div key={anime.id} className="group cursor-pointer">
-                <div className="overflow-hidden rounded-xl bg-gray-800 aspect-[2/3] shadow-lg">
-                  <img 
-                    src={anime.image} 
-                    alt={anime.title} 
-                    className="w-full h-full object-cover group-hover:opacity-80 transition-opacity duration-200"
-                  />
+            {loading && discover.length === 0 ? (
+              <p className="text-gray-400 px-1 col-span-full">Loading movies...</p>
+            ) : (
+              discover.map((anime) => (
+                <div key={anime.id} className="group cursor-pointer">
+                  <div className="overflow-hidden rounded-xl bg-gray-800 aspect-[2/3] shadow-lg">
+                    <img 
+                      src={anime.coverImage.extraLarge} 
+                      alt={getTitle(anime)} 
+                      className="w-full h-full object-cover group-hover:opacity-80 transition-opacity duration-200"
+                    />
+                  </div>
+                  <h3 className="mt-2 text-sm md:text-base font-medium truncate" title={getTitle(anime)}>
+                    {getTitle(anime)}
+                  </h3>
                 </div>
-                <h3 className="mt-2 text-sm md:text-base font-medium truncate">{anime.title}</h3>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </section>
 
